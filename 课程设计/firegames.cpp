@@ -7,10 +7,11 @@
 #include <cstring>
 #include <windows.h>
 #include <string>
+#include <cmath>
 
-const int GRID = 15;
-const int CELL = 40;
-const int MARGIN = 50;
+const int GRID = 19;
+const int CELL = 32;
+const int MARGIN = 40;
 const int BOARD_PX = MARGIN * 2 + (GRID - 1) * CELL;
 const int WIN_H = BOARD_PX + 70;
 
@@ -39,26 +40,26 @@ void DrawBoard() {
     for (int i = 0; i < BOARD_PX; i += 5) line(0, i, BOARD_PX, i);
     setlinecolor(RGB(70, 35, 8));
     setlinestyle(PS_SOLID, 3);
-    rectangle(MARGIN - 12, MARGIN - 12, BOARD_PX - MARGIN + 12, BOARD_PX - MARGIN + 12);
+    rectangle(MARGIN - 10, MARGIN - 10, BOARD_PX - MARGIN + 10, BOARD_PX - MARGIN + 10);
     setlinestyle(PS_SOLID, 1);
     setlinecolor(RGB(50, 25, 5));
     for (int i = 0; i < GRID; i++) {
         line(MARGIN, MARGIN + i * CELL, MARGIN + (GRID - 1) * CELL, MARGIN + i * CELL);
         line(MARGIN + i * CELL, MARGIN, MARGIN + i * CELL, MARGIN + (GRID - 1) * CELL);
     }
-    int dots[] = { 3, 7, 11 };
+    int dots[] = { 3, 9, 15 };
     setfillcolor(RGB(50, 25, 5));
     for (int a = 0; a < 3; a++)
         for (int b = 0; b < 3; b++)
-            fillcircle(MARGIN + dots[a] * CELL, MARGIN + dots[b] * CELL, 4);
+            fillcircle(MARGIN + dots[a] * CELL, MARGIN + dots[b] * CELL, 3);
 }
 
 void DrawPiece(int r, int c, int type, int order = -1) {
     int x = MARGIN + c * CELL;
     int y = MARGIN + r * CELL;
-    int rad = CELL / 2 - 3;
+    int rad = CELL / 2 - 2;
     setfillcolor(RGB(140, 100, 50));
-    solidcircle(x + 2, y + 2, rad);
+    solidcircle(x + 1, y + 1, rad);
     if (type == STONE_BLACK) {
         for (int i = rad; i > 0; --i) {
             int v = 15 + (rad - i) * 50 / rad;
@@ -79,24 +80,23 @@ void DrawPiece(int r, int c, int type, int order = -1) {
     }
     if (r == lastR && c == lastC && !viewing) {
         setfillcolor(RGB(220, 50, 50));
-        solidcircle(x, y, 4);
+        solidcircle(x, y, 3);
     }
     if (viewing && order > 0) {
         setbkmode(TRANSPARENT);
         settextcolor(type == STONE_BLACK ? RGB(220, 220, 220) : RGB(40, 40, 40));
-        settextstyle(14, 0, L"Arial");
+        settextstyle(12, 0, L"Arial");
         wchar_t buf[8];
         swprintf_s(buf, L"%d", order);
         int tw = textwidth(buf);
-        outtextxy(x - tw / 2, y - 7, buf);
+        outtextxy(x - tw / 2, y - 6, buf);
     }
 }
 
 void DrawGhost(int r, int c, int type) {
     int x = MARGIN + c * CELL;
     int y = MARGIN + r * CELL;
-    int rad = CELL / 2 - 3;
-    setfillstyle(BS_SOLID);
+    int rad = CELL / 2 - 2;
     if (type == STONE_BLACK)
         setfillcolor(RGB(60, 60, 60));
     else
@@ -105,6 +105,12 @@ void DrawGhost(int r, int c, int type) {
     setlinecolor(RGB(180, 180, 180));
     setlinestyle(PS_SOLID, 1);
     circle(x, y, rad);
+}
+
+void DrawCenteredText(int cx, int cy, const wchar_t* text) {
+    setbkmode(TRANSPARENT);
+    int w = textwidth(text), h = textheight(text);
+    outtextxy(cx - w / 2, cy - h / 2, text);
 }
 
 void RedrawBoard(int showNumbers = 0) {
@@ -117,7 +123,6 @@ void RedrawBoard(int showNumbers = 0) {
         int r = history[i].first, c = history[i].second;
         DrawPiece(r, c, board[r][c], showNumbers ? i + 1 : -1);
     }
-    // 虚影
     if (!gameOver && hoverR >= 0 && hoverC >= 0 && board[hoverR][hoverC] == EMPTY)
         DrawGhost(hoverR, hoverC, playerColor);
 
@@ -126,9 +131,10 @@ void RedrawBoard(int showNumbers = 0) {
     solidroundrect(40, BOARD_PX + 10, 180, BOARD_PX + 50, 8, 8);
     settextcolor(WHITE);
     settextstyle(16, 0, L"微软雅黑");
-    outtextxy(80, BOARD_PX + 22, L"撤回");
+    DrawCenteredText(110, BOARD_PX + 30, L"撤回");
+
     solidroundrect(BOARD_PX - 180, BOARD_PX + 10, BOARD_PX - 40, BOARD_PX + 50, 8, 8);
-    outtextxy(BOARD_PX - 140, BOARD_PX + 22, L"回菜单");
+    DrawCenteredText(BOARD_PX - 110, BOARD_PX + 30, L"回到菜单");
     EndBatchDraw();
 }
 
@@ -247,7 +253,7 @@ void AI_Easy(int& outR, int& outC) {
             if (s > best) { best = s; cands.clear(); cands.push_back(std::make_pair(r, c)); }
             else if (s == best) cands.push_back(std::make_pair(r, c));
         }
-    if (cands.empty()) { outR = 7; outC = 7; return; }
+    if (cands.empty()) { outR = 9; outC = 9; return; }
     std::pair<int, int> p = cands[rng() % cands.size()];
     outR = p.first; outC = p.second;
 }
@@ -331,7 +337,7 @@ void FindBest(int& outR, int& outC, int depth) {
                 board[r][c] = EMPTY;
             }
     best = -999999999;
-    outR = 7; outC = 7;
+    outR = 9; outC = 9;
     for (r = 0; r < GRID; r++)
         for (c = 0; c < GRID; c++) {
             if (board[r][c] || IsForbidden(r, c, aiColor)) continue;
@@ -351,14 +357,131 @@ void FindBest(int& outR, int& outC, int depth) {
         }
 }
 
-void AI_Medium(int& outR, int& outC) { FindBest(outR, outC, 1); }
+struct MCTSNode {
+    int r, c;
+    int visits;
+    double wins;
+    MCTSNode* parent;
+    std::vector<MCTSNode*> children;
+    int player;
+};
+
+void DeleteTree(MCTSNode* node) {
+    if (!node) return;
+    for (size_t i = 0; i < node->children.size(); i++)
+        DeleteTree(node->children[i]);
+    delete node;
+}
+
+std::vector<std::pair<int, int>> GetCandidates(int simBoard[GRID][GRID], int role) {
+    std::vector<MoveScore> scored;
+    for (int r = 0; r < GRID; r++)
+        for (int c = 0; c < GRID; c++) {
+            if (simBoard[r][c]) continue;
+            int hasNear = 0;
+            for (int dr = -2; dr <= 2 && !hasNear; dr++)
+                for (int dc = -2; dc <= 2; dc++) {
+                    int nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID && simBoard[nr][nc]) hasNear = 1;
+                }
+            if (!hasNear && history.size() > 0) continue;
+            int sc = EvaluatePoint(r, c, role) * 2 + EvaluatePoint(r, c, 3 - role);
+            scored.push_back({ r, c, sc });
+        }
+    std::sort(scored.begin(), scored.end(), cmpMove);
+    std::vector<std::pair<int, int>> res;
+    int limit = 18;
+    if ((int)scored.size() < limit) limit = (int)scored.size();
+    for (int i = 0; i < limit; i++)
+        res.push_back(std::make_pair(scored[i].r, scored[i].c));
+    return res;
+}
+
+int Simulate(int simBoard[GRID][GRID], int turn) {
+    int localMove = 0;
+    while (localMove < 40) {
+        auto cands = GetCandidates(simBoard, turn);
+        if (cands.empty()) return 0;
+        int topN = 6;
+        if ((int)cands.size() < topN) topN = (int)cands.size();
+        int idx = (rng() % 5 == 0) ? (rng() % cands.size()) : (rng() % topN);
+        auto mv = cands[idx];
+        simBoard[mv.first][mv.second] = turn;
+        if (CheckFive(mv.first, mv.second, turn)) return (turn == aiColor) ? 1 : -1;
+        turn = 3 - turn;
+        localMove++;
+    }
+    return 0;
+}
+
+void AI_MCTS(int& outR, int& outC) {
+    const int SIMULATIONS = 600;
+    MCTSNode* root = new MCTSNode{ -1, -1, 0, 0.0, nullptr, {}, aiColor };
+
+    for (int sim = 0; sim < SIMULATIONS; sim++) {
+        int simBoard[GRID][GRID];
+        memcpy(simBoard, board, sizeof(board));
+        MCTSNode* node = root;
+        int turn = aiColor;
+        int depth = 0;
+
+        while (depth < 15) {
+            if (node->children.empty()) {
+                auto cands = GetCandidates(simBoard, turn);
+                for (size_t i = 0; i < cands.size(); i++) {
+                    MCTSNode* child = new MCTSNode{ cands[i].first, cands[i].second, 0, 0.0, node, {}, turn };
+                    node->children.push_back(child);
+                }
+                if (node->children.empty()) break;
+                node = node->children[0];
+                simBoard[node->r][node->c] = turn;
+                turn = 3 - turn;
+                break;
+            }
+            double bestUCT = -1e9;
+            MCTSNode* bestChild = nullptr;
+            for (size_t i = 0; i < node->children.size(); i++) {
+                MCTSNode* ch = node->children[i];
+                double uct = (ch->visits == 0) ? 1e9 : (ch->wins / ch->visits) + 1.2 * sqrt(log(node->visits + 1.0) / ch->visits);
+                if (uct > bestUCT) { bestUCT = uct; bestChild = ch; }
+            }
+            if (!bestChild) break;
+            node = bestChild;
+            simBoard[node->r][node->c] = node->player;
+            turn = 3 - node->player;
+            depth++;
+        }
+
+        int result = Simulate(simBoard, turn);
+
+        while (node) {
+            node->visits++;
+            if (node->player == aiColor) node->wins += (result == 1) ? 1.0 : (result == -1 ? 0.0 : 0.5);
+            else node->wins += (result == -1) ? 1.0 : (result == 1 ? 0.0 : 0.5);
+            node = node->parent;
+        }
+    }
+
+    double bestRate = -1;
+    outR = 9; outC = 9;
+    for (size_t i = 0; i < root->children.size(); i++) {
+        MCTSNode* ch = root->children[i];
+        if (ch->visits > 0) {
+            double rate = ch->wins / ch->visits;
+            if (rate > bestRate) { bestRate = rate; outR = ch->r; outC = ch->c; }
+        }
+    }
+    DeleteTree(root);
+}
+
+void AI_Medium(int& outR, int& outC) { AI_MCTS(outR, outC); }
 void AI_Hard(int& outR, int& outC) { FindBest(outR, outC, 4); }
 
 void DoAIMove() {
     Sleep(400);
-    int r = 7, c = 7;
+    int r = 9, c = 9;
     if (moveCount == 0 && aiColor == STONE_BLACK) {
-        r = 7; c = 7;
+        r = 9; c = 9;
     }
     else {
         if (difficulty == 1) AI_Easy(r, c);
@@ -380,12 +503,6 @@ void DoAIMove() {
         MessageBox(GetHWnd(), L"AI 获胜！", L"游戏结束", MB_OK);
         gameOver = 1; viewing = 1; RedrawBoard(1);
     }
-}
-
-void DrawCenteredText(int cx, int cy, const wchar_t* text) {
-    setbkmode(TRANSPARENT);
-    int w = textwidth(text), h = textheight(text);
-    outtextxy(cx - w / 2, cy - h / 2, text);
 }
 
 void DrawMenu() {
@@ -503,9 +620,14 @@ void RunGame() {
     RedrawBoard();
     if (playerColor == STONE_WHITE) { Sleep(500); DoAIMove(); }
     ExMessage msg;
+    int lastHoverTime = 0;
     while (1) {
         if (peekmessage(&msg, EM_MOUSE)) {
             if (msg.message == WM_MOUSEMOVE && !gameOver) {
+                int now = GetTickCount();
+                if (now - lastHoverTime < 30) continue; // 限制刷新频率
+                lastHoverTime = now;
+
                 int c = (msg.x - MARGIN + CELL / 2) / CELL;
                 int r = (msg.y - MARGIN + CELL / 2) / CELL;
                 if (r >= 0 && r < GRID && c >= 0 && c < GRID && board[r][c] == EMPTY) {
@@ -529,7 +651,7 @@ void RunGame() {
                 int c = (x - MARGIN + CELL / 2) / CELL;
                 int r = (y - MARGIN + CELL / 2) / CELL;
                 if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c] != EMPTY) continue;
-                if (moveCount == 0 && playerColor == STONE_BLACK && (r != 7 || c != 7)) {
+                if (moveCount == 0 && playerColor == STONE_BLACK && (r != 9 || c != 9)) {
                     MessageBox(GetHWnd(), L"黑棋第一手必须下在天元！", L"提示", MB_OK);
                     continue;
                 }
@@ -551,13 +673,13 @@ void RunGame() {
                 DoAIMove();
             }
         }
-        Sleep(10);
+        Sleep(5);
     }
 }
 
 int main() {
     initgraph(BOARD_PX, WIN_H);
-    SetWindowText(GetHWnd(), L"C++ 五子棋 · 日式规则");
+    SetWindowText(GetHWnd(), L"五子棋 · 人机对战");
     while (1) { RunMenu(); RunGame(); }
     closegraph();
     return 0;

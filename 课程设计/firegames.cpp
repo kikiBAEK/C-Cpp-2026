@@ -8,6 +8,8 @@
 #include <windows.h>
 #include <string>
 #include <cmath>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 
 const int GRID = 19;
 const int CELL = 32;
@@ -24,14 +26,69 @@ int playerColor = STONE_BLACK;
 int aiColor = STONE_WHITE;
 int difficulty = 1;
 int useForbidden = 0;
+int enableBGM = 1;
+int enableSFX = 1;
+int timerLevel = 4;
+int dualMode = 0;
 int gameOver = 0;
 int viewing = 0;
 int lastR = -1, lastC = -1;
 int moveCount = 0;
 int hoverR = -1, hoverC = -1;
+int pausedGame = 0;
+int playerHasMoved = 0;
 std::vector<std::pair<int, int>> history;
 
 std::mt19937 rng((unsigned)time(0));
+
+wchar_t exeDir[MAX_PATH] = { 0 };
+
+int timerSeconds[] = { 5, 10, 15, 30, 0 };
+int remainTime = 0;
+DWORD lastTick = 0;
+int isPlayerTurn = 1;
+int currentTurn = STONE_BLACK;
+
+void GetExeDir() {
+    GetModuleFileNameW(NULL, exeDir, MAX_PATH);
+    wchar_t* p = wcsrchr(exeDir, L'\\');
+    if (p) *(p + 1) = L'\0';
+}
+
+void PlayBGM() {
+    if (!enableBGM) return;
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%sbgm.mp3", exeDir);
+    wchar_t cmd[MAX_PATH + 64];
+    mciSendString(L"close bgm", NULL, 0, NULL);
+    swprintf_s(cmd, L"open \"%s\" alias bgm", path);
+    mciSendString(cmd, NULL, 0, NULL);
+    mciSendString(L"play bgm repeat", NULL, 0, NULL);
+}
+
+void StopBGM() {
+    mciSendString(L"stop bgm", NULL, 0, NULL);
+    mciSendString(L"close bgm", NULL, 0, NULL);
+    mciSendString(L"close drop", NULL, 0, NULL);
+}
+
+void PlayDropSound() {
+    if (!enableSFX) return;
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%sdrop.mp3", exeDir);
+    wchar_t cmd[MAX_PATH + 64];
+    mciSendString(L"close drop", NULL, 0, NULL);
+    swprintf_s(cmd, L"open \"%s\" alias drop", path);
+    mciSendString(cmd, NULL, 0, NULL);
+    mciSendString(L"setaudio drop volume to 900", NULL, 0, NULL);
+    mciSendString(L"play drop", NULL, 0, NULL);
+}
+
+void ResetPlayerTimer() {
+    if (timerLevel >= 4) return;
+    remainTime = timerSeconds[timerLevel];
+    lastTick = GetTickCount();
+}
 
 void DrawBoard() {
     setfillcolor(RGB(222, 172, 98));
@@ -113,9 +170,26 @@ void DrawCenteredText(int cx, int cy, const wchar_t* text) {
     outtextxy(cx - w / 2, cy - h / 2, text);
 }
 
+void DrawTimer() {
+    if (timerLevel >= 4 || gameOver) return;
+
+    int cx = BOARD_PX / 2;
+    int cy = BOARD_PX + 30;
+    int radius = 18;
+
+    setlinecolor(RGB(80, 80, 90));
+    setlinestyle(PS_SOLID, 3);
+    circle(cx, cy, radius);
+
+    settextcolor(WHITE);
+    settextstyle(16, 0, L"微软雅黑");
+    wchar_t buf[8];
+    swprintf_s(buf, L"%d", remainTime);
+    DrawCenteredText(cx, cy, buf);
+}
+
 void RedrawBoard(int showNumbers = 0) {
     BeginBatchDraw();
-    cleardevice();
     setbkcolor(RGB(28, 28, 38));
     cleardevice();
     DrawBoard();
@@ -124,7 +198,7 @@ void RedrawBoard(int showNumbers = 0) {
         DrawPiece(r, c, board[r][c], showNumbers ? i + 1 : -1);
     }
     if (!gameOver && hoverR >= 0 && hoverC >= 0 && board[hoverR][hoverC] == EMPTY)
-        DrawGhost(hoverR, hoverC, playerColor);
+        DrawGhost(hoverR, hoverC, dualMode ? currentTurn : playerColor);
 
     setbkmode(TRANSPARENT);
     setfillcolor(RGB(70, 70, 80));
@@ -134,7 +208,10 @@ void RedrawBoard(int showNumbers = 0) {
     DrawCenteredText(110, BOARD_PX + 30, L"撤回");
 
     solidroundrect(BOARD_PX - 180, BOARD_PX + 10, BOARD_PX - 40, BOARD_PX + 50, 8, 8);
-    DrawCenteredText(BOARD_PX - 110, BOARD_PX + 30, L"回到菜单");
+    const wchar_t* btnText = (gameOver || !playerHasMoved) ? L"回到桌面" : L"暂离";
+    DrawCenteredText(BOARD_PX - 110, BOARD_PX + 30, btnText);
+
+    DrawTimer();
     EndBatchDraw();
 }
 
@@ -242,13 +319,18 @@ int EvaluateBoard() {
     return score;
 }
 
+int NeedAvoidForbidden() {
+    return useForbidden && aiColor == STONE_BLACK;
+}
+
 void AI_Easy(int& outR, int& outC) {
     int best = -1;
     std::vector<std::pair<int, int>> cands;
+    int avoid = NeedAvoidForbidden();
     for (int r = 0; r < GRID; r++)
         for (int c = 0; c < GRID; c++) {
             if (board[r][c]) continue;
-            if (IsForbidden(r, c, aiColor)) continue;
+            if (avoid && IsForbidden(r, c, aiColor)) continue;
             int s = EvaluatePoint(r, c, aiColor) + EvaluatePoint(r, c, playerColor) * 9 / 10;
             if (s > best) { best = s; cands.clear(); cands.push_back(std::make_pair(r, c)); }
             else if (s == best) cands.push_back(std::make_pair(r, c));
@@ -269,6 +351,7 @@ int Minimax(int depth, int alpha, int beta, int maximizing, int role) {
     std::vector<MoveScore> moves;
     int r, c, dr, dc, nr, nc;
     int hasNear;
+    int avoid = (useForbidden && role == STONE_BLACK);
     for (r = 0; r < GRID; r++)
         for (c = 0; c < GRID; c++)
             if (!board[r][c]) {
@@ -279,6 +362,7 @@ int Minimax(int depth, int alpha, int beta, int maximizing, int role) {
                         if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID && board[nr][nc]) hasNear = 1;
                     }
                 if (hasNear || history.empty()) {
+                    if (avoid && IsForbidden(r, c, role)) continue;
                     int sc = EvaluatePoint(r, c, role) + EvaluatePoint(r, c, 3 - role);
                     moves.push_back({ r, c, sc });
                 }
@@ -292,7 +376,6 @@ int Minimax(int depth, int alpha, int beta, int maximizing, int role) {
         best = -999999999;
         for (i = 0; i < moves.size(); i++) {
             int mr = moves[i].r, mc = moves[i].c;
-            if (IsForbidden(mr, mc, role)) continue;
             board[mr][mc] = role;
             if (CheckFive(mr, mc, role)) { board[mr][mc] = EMPTY; return 2000000; }
             v = Minimax(depth - 1, alpha, beta, 0, 3 - role);
@@ -322,9 +405,11 @@ int Minimax(int depth, int alpha, int beta, int maximizing, int role) {
 void FindBest(int& outR, int& outC, int depth) {
     int r, c, dr, dc, nr, nc, s, best;
     int hasNear;
+    int avoid = NeedAvoidForbidden();
+
     for (r = 0; r < GRID; r++)
         for (c = 0; c < GRID; c++)
-            if (!board[r][c] && !IsForbidden(r, c, aiColor)) {
+            if (!board[r][c] && !(avoid && IsForbidden(r, c, aiColor))) {
                 board[r][c] = aiColor;
                 if (CheckFive(r, c, aiColor)) { board[r][c] = EMPTY; outR = r; outC = c; return; }
                 board[r][c] = EMPTY;
@@ -340,7 +425,8 @@ void FindBest(int& outR, int& outC, int depth) {
     outR = 9; outC = 9;
     for (r = 0; r < GRID; r++)
         for (c = 0; c < GRID; c++) {
-            if (board[r][c] || IsForbidden(r, c, aiColor)) continue;
+            if (board[r][c]) continue;
+            if (avoid && IsForbidden(r, c, aiColor)) continue;
             hasNear = (history.empty());
             if (!hasNear) {
                 for (dr = -2; dr <= 2 && !hasNear; dr++)
@@ -375,9 +461,11 @@ void DeleteTree(MCTSNode* node) {
 
 std::vector<std::pair<int, int>> GetCandidates(int simBoard[GRID][GRID], int role) {
     std::vector<MoveScore> scored;
+    int avoid = (useForbidden && role == STONE_BLACK);
     for (int r = 0; r < GRID; r++)
         for (int c = 0; c < GRID; c++) {
             if (simBoard[r][c]) continue;
+            if (avoid && IsForbidden(r, c, role)) continue;
             int hasNear = 0;
             for (int dr = -2; dr <= 2 && !hasNear; dr++)
                 for (int dc = -2; dc <= 2; dc++) {
@@ -478,7 +566,11 @@ void AI_Medium(int& outR, int& outC) { AI_MCTS(outR, outC); }
 void AI_Hard(int& outR, int& outC) { FindBest(outR, outC, 4); }
 
 void DoAIMove() {
-    Sleep(400);
+    if (dualMode) return;
+    isPlayerTurn = 0;
+    ResetPlayerTimer();
+    RedrawBoard();
+    Sleep(350);
     int r = 9, c = 9;
     if (moveCount == 0 && aiColor == STONE_BLACK) {
         r = 9; c = 9;
@@ -488,21 +580,32 @@ void DoAIMove() {
         else if (difficulty == 2) AI_Medium(r, c);
         else AI_Hard(r, c);
     }
+    if (NeedAvoidForbidden() && IsForbidden(r, c, aiColor)) {
+        int found = 0;
+        for (int rr = 0; rr < GRID && !found; rr++)
+            for (int cc = 0; cc < GRID && !found; cc++)
+                if (!board[rr][cc] && !IsForbidden(rr, cc, aiColor)) {
+                    r = rr; c = cc; found = 1;
+                }
+    }
     board[r][c] = aiColor;
     history.push_back(std::make_pair(r, c));
     lastR = r; lastC = c;
     moveCount++;
     hoverR = hoverC = -1;
+    PlayDropSound();
     RedrawBoard();
-    Sleep(300);
+    Sleep(200);
     if (IsForbidden(r, c, aiColor)) {
         MessageBox(GetHWnd(), L"黑棋禁手，白棋获胜！", L"游戏结束", MB_OK);
         gameOver = 1; viewing = 1; RedrawBoard(1); return;
     }
     if (CheckFive(r, c, aiColor)) {
-        MessageBox(GetHWnd(), L"AI 获胜！", L"游戏结束", MB_OK);
+        MessageBox(GetHWnd(), dualMode ? L"白棋获胜！" : L"AI 获胜！", L"游戏结束", MB_OK);
         gameOver = 1; viewing = 1; RedrawBoard(1);
     }
+    isPlayerTurn = 1;
+    ResetPlayerTimer();
 }
 
 void DrawMenu() {
@@ -510,14 +613,28 @@ void DrawMenu() {
     setbkcolor(RGB(28, 28, 38));
     cleardevice();
     setbkmode(TRANSPARENT);
-    settextcolor(RGB(245, 225, 190));
+
     settextstyle(42, 0, L"微软雅黑");
-    DrawCenteredText(BOARD_PX / 2, 50, L"五子棋 · 人机对战");
+    settextcolor(RGB(245, 225, 190));
+    int titleW = textwidth(L"五子棋");
+    int modeW = 140;
+    int gap = 20;
+    int totalW = titleW + gap + modeW;
+    int startX = (BOARD_PX - totalW) / 2;
+
+    outtextxy(startX, 40, L"五子棋");
+
+    COLORREF modeColor = pausedGame ? RGB(90, 90, 90) : (dualMode ? RGB(50, 160, 70) : RGB(50, 130, 210));
+    setfillcolor(modeColor);
+    solidroundrect(startX + titleW + gap, 38, startX + titleW + gap + modeW, 82, 10, 10);
+    settextcolor(pausedGame ? RGB(160, 160, 160) : WHITE);
+    settextstyle(18, 0, L"微软雅黑");
+    DrawCenteredText(startX + titleW + gap + modeW / 2, 60, dualMode ? L"双人对战" : L"人机对战");
 
     settextstyle(22, 0, L"微软雅黑");
     settextcolor(RGB(210, 210, 210));
-    outtextxy(70, 110, L"难度：");
-    outtextxy(70, 220, L"执子：");
+    outtextxy(70, 120, L"难度：");
+    outtextxy(70, 230, L"执子：");
 
     auto drawBtn = [](int x, int y, int w, int h, const wchar_t* text, int sel) {
         setfillcolor(sel ? RGB(50, 130, 210) : RGB(48, 48, 58));
@@ -527,73 +644,179 @@ void DrawMenu() {
         DrawCenteredText(x + w / 2, y + h / 2, text);
         };
 
-    drawBtn(70, 140, 150, 48, L"简单", difficulty == 1);
-    drawBtn(250, 140, 150, 48, L"中等", difficulty == 2);
-    drawBtn(430, 140, 150, 48, L"困难", difficulty == 3);
+    drawBtn(70, 150, 150, 48, L"简单", difficulty == 1);
+    drawBtn(250, 150, 150, 48, L"中等", difficulty == 2);
+    drawBtn(430, 150, 150, 48, L"困难", difficulty == 3);
 
-    drawBtn(70, 250, 150, 48, L"黑棋", playerColor == STONE_BLACK);
-    drawBtn(250, 250, 150, 48, L"白棋", playerColor == STONE_WHITE);
-    drawBtn(430, 250, 150, 48, L"随机", playerColor == 0);
+    drawBtn(70, 260, 150, 48, L"黑棋", playerColor == STONE_BLACK);
+    drawBtn(250, 260, 150, 48, L"白棋", playerColor == STONE_WHITE);
+    drawBtn(430, 260, 150, 48, L"随机", playerColor == 0);
 
-    setfillcolor(RGB(48, 48, 58));
+    COLORREF forbidColor = pausedGame ? RGB(90, 90, 90) : RGB(48, 48, 58);
+    setfillcolor(forbidColor);
     solidroundrect(70, 330, 110, 370, 6, 6);
-    if (useForbidden) {
+    if (useForbidden && !pausedGame) {
         setlinecolor(RGB(80, 180, 100));
         setlinestyle(PS_SOLID, 3);
         line(80, 350, 95, 365);
         line(95, 365, 105, 335);
     }
-    settextcolor(RGB(210, 210, 210));
+    settextcolor(pausedGame ? RGB(140, 140, 140) : RGB(210, 210, 210));
     settextstyle(20, 0, L"微软雅黑");
-    outtextxy(125, 340, L"启用禁手（黑棋三三、四四、长连）");
+    outtextxy(125, 340, L"启用禁手");
 
-    setfillcolor(RGB(210, 65, 45));
-    solidroundrect(220, 410, 440, 470, 12, 12);
-    settextcolor(WHITE);
-    settextstyle(26, 0, L"微软雅黑");
-    DrawCenteredText(330, 440, L"开 始");
+    solidroundrect(250, 330, 290, 370, 6, 6);
+    if (enableBGM) {
+        setlinecolor(RGB(80, 180, 100));
+        setlinestyle(PS_SOLID, 3);
+        line(260, 350, 275, 365);
+        line(275, 365, 285, 335);
+    }
+    settextcolor(RGB(210, 210, 210));
+    outtextxy(305, 340, L"音乐");
+
+    solidroundrect(400, 330, 440, 370, 6, 6);
+    if (enableSFX) {
+        setlinecolor(RGB(80, 180, 100));
+        setlinestyle(PS_SOLID, 3);
+        line(410, 350, 425, 365);
+        line(425, 365, 435, 335);
+    }
+    outtextxy(455, 340, L"音效");
+
+    settextcolor(pausedGame ? RGB(140, 140, 140) : RGB(210, 210, 210));
+    settextstyle(18, 0, L"微软雅黑");
+    outtextxy(70, 400, L"计时器：");
+    const wchar_t* labels[] = { L"5秒", L"10秒", L"15秒", L"30秒", L"无限制" };
+    int baseX = 160;
+    for (int i = 0; i < 5; i++) {
+        int x = baseX + i * 90;
+        COLORREF btnColor = pausedGame ? RGB(90, 90, 90) : (timerLevel == i ? RGB(50, 130, 210) : RGB(48, 48, 58));
+        setfillcolor(btnColor);
+        solidroundrect(x, 390, x + 70, 430, 8, 8);
+        settextcolor(pausedGame ? RGB(160, 160, 160) : WHITE);
+        settextstyle(16, 0, L"微软雅黑");
+        DrawCenteredText(x + 35, 410, labels[i]);
+    }
+
+    if (pausedGame) {
+        // 两个按钮整体居中
+        int btnW = 180;
+        int btnH = 60;
+        int gap = 40;
+        int totalBtnW = btnW * 2 + gap;
+        int btnStartX = (BOARD_PX - totalBtnW) / 2;
+
+        setfillcolor(RGB(50, 160, 70));
+        solidroundrect(btnStartX, 490, btnStartX + btnW, 550, 12, 12);
+        settextcolor(WHITE);
+        settextstyle(22, 0, L"微软雅黑");
+        DrawCenteredText(btnStartX + btnW / 2, 520, L"继续游戏");
+
+        setfillcolor(RGB(210, 65, 45));
+        solidroundrect(btnStartX + btnW + gap, 490, btnStartX + btnW * 2 + gap, 550, 12, 12);
+        DrawCenteredText(btnStartX + btnW + gap + btnW / 2, 520, L"重制游戏");
+    }
+    else {
+        setfillcolor(RGB(210, 65, 45));
+        solidroundrect(220, 490, 440, 550, 12, 12);
+        settextcolor(WHITE);
+        settextstyle(26, 0, L"微软雅黑");
+        DrawCenteredText(330, 520, L"开 始");
+    }
 
     setfillcolor(RGB(80, 80, 90));
-    solidroundrect(220, 490, 440, 540, 10, 10);
+    solidroundrect(220, 580, 440, 630, 10, 10);
     settextstyle(20, 0, L"微软雅黑");
-    DrawCenteredText(330, 515, L"退 出");
-
-    settextstyle(15, 0, L"微软雅黑");
-    settextcolor(RGB(140, 140, 140));
-    DrawCenteredText(BOARD_PX / 2, 580, L"");
+    DrawCenteredText(330, 605, L"退 出");
 }
 
 void RunMenu() {
-    difficulty = 1;
-    playerColor = STONE_BLACK;
-    useForbidden = 0;
     int needRedraw = 1;
+    if (enableBGM) PlayBGM();
     while (1) {
         if (needRedraw) { DrawMenu(); needRedraw = 0; }
         ExMessage msg;
         if (peekmessage(&msg, EM_MOUSE) && msg.message == WM_LBUTTONDOWN) {
             int x = msg.x, y = msg.y;
             int changed = 0;
-            if (y >= 140 && y <= 188) {
+
+            settextstyle(42, 0, L"微软雅黑");
+            int titleW = textwidth(L"五子棋");
+            int modeW = 140;
+            int gap = 20;
+            int totalW = titleW + gap + modeW;
+            int startX = (BOARD_PX - totalW) / 2;
+            int modeX1 = startX + titleW + gap;
+            int modeX2 = modeX1 + modeW;
+
+            if (y >= 150 && y <= 198) {
                 if (x >= 70 && x <= 220 && difficulty != 1) { difficulty = 1; changed = 1; }
                 else if (x >= 250 && x <= 400 && difficulty != 2) { difficulty = 2; changed = 1; }
                 else if (x >= 430 && x <= 580 && difficulty != 3) { difficulty = 3; changed = 1; }
             }
-            if (y >= 250 && y <= 298) {
+            if (y >= 260 && y <= 308) {
                 if (x >= 70 && x <= 220 && playerColor != STONE_BLACK) { playerColor = STONE_BLACK; changed = 1; }
                 else if (x >= 250 && x <= 400 && playerColor != STONE_WHITE) { playerColor = STONE_WHITE; changed = 1; }
                 else if (x >= 430 && x <= 580 && playerColor != 0) { playerColor = 0; changed = 1; }
             }
-            if (x >= 70 && x <= 110 && y >= 330 && y <= 370) {
+            if (!pausedGame && x >= 70 && x <= 110 && y >= 330 && y <= 370) {
                 useForbidden = !useForbidden;
                 changed = 1;
             }
-            if (x >= 220 && x <= 440 && y >= 410 && y <= 470) {
-                if (playerColor == 0) playerColor = (rng() % 2 == 0) ? STONE_BLACK : STONE_WHITE;
-                aiColor = 3 - playerColor;
-                return;
+            if (x >= 250 && x <= 290 && y >= 330 && y <= 370) {
+                enableBGM = !enableBGM;
+                if (enableBGM) PlayBGM();
+                else StopBGM();
+                changed = 1;
             }
-            if (x >= 220 && x <= 440 && y >= 490 && y <= 540) { closegraph(); exit(0); }
+            if (x >= 400 && x <= 440 && y >= 330 && y <= 370) {
+                enableSFX = !enableSFX;
+                changed = 1;
+            }
+            if (!pausedGame && y >= 390 && y <= 430) {
+                for (int i = 0; i < 5; i++) {
+                    int bx = 160 + i * 90;
+                    if (x >= bx && x <= bx + 70 && timerLevel != i) {
+                        timerLevel = i;
+                        changed = 1;
+                        break;
+                    }
+                }
+            }
+            if (!pausedGame && x >= modeX1 && x <= modeX2 && y >= 38 && y <= 82) {
+                dualMode = !dualMode;
+                changed = 1;
+            }
+
+            if (pausedGame) {
+                int btnW = 180;
+                int gapBtn = 40;
+                int totalBtnW = btnW * 2 + gapBtn;
+                int btnStartX = (BOARD_PX - totalBtnW) / 2;
+
+                if (x >= btnStartX && x <= btnStartX + btnW && y >= 490 && y <= 550) {
+                    return;
+                }
+                if (x >= btnStartX + btnW + gapBtn && x <= btnStartX + btnW * 2 + gapBtn && y >= 490 && y <= 550) {
+                    pausedGame = 0;
+                    needRedraw = 1;
+                    continue;
+                }
+            }
+            else {
+                if (x >= 220 && x <= 440 && y >= 490 && y <= 550) {
+                    if (playerColor == 0) playerColor = (rng() % 2 == 0) ? STONE_BLACK : STONE_WHITE;
+                    aiColor = 3 - playerColor;
+                    return;
+                }
+            }
+
+            if (x >= 220 && x <= 440 && y >= 580 && y <= 630) {
+                StopBGM();
+                closegraph();
+                exit(0);
+            }
             if (changed) needRedraw = 1;
         }
         Sleep(10);
@@ -606,26 +829,59 @@ void UndoToPlayer() {
     std::pair<int, int> pl = history.back(); history.pop_back(); board[pl.first][pl.second] = EMPTY; moveCount--;
     if (!history.empty()) { lastR = history.back().first; lastC = history.back().second; }
     else lastR = lastC = -1;
+    int playerMoves = 0;
+    for (size_t i = 0; i < history.size(); i++) {
+        if ((i % 2 == 0 && playerColor == STONE_BLACK) || (i % 2 == 1 && playerColor == STONE_WHITE))
+            playerMoves++;
+    }
+    playerHasMoved = (playerMoves > 0);
+    isPlayerTurn = 1;
+    if (dualMode) currentTurn = (history.size() % 2 == 0) ? STONE_BLACK : STONE_WHITE;
+    ResetPlayerTimer();
     RedrawBoard();
 }
 
 void RunGame() {
-    memset(board, 0, sizeof(board));
-    history.clear();
-    lastR = lastC = -1;
-    moveCount = 0;
-    gameOver = 0;
-    viewing = 0;
+    if (!pausedGame) {
+        memset(board, 0, sizeof(board));
+        history.clear();
+        lastR = lastC = -1;
+        moveCount = 0;
+        gameOver = 0;
+        viewing = 0;
+        playerHasMoved = 0;
+        currentTurn = STONE_BLACK;
+    }
+    pausedGame = 0;
     hoverR = hoverC = -1;
+    isPlayerTurn = 1;
+    ResetPlayerTimer();
     RedrawBoard();
-    if (playerColor == STONE_WHITE) { Sleep(500); DoAIMove(); }
+    if (!dualMode && playerColor == STONE_WHITE && moveCount == 0) { Sleep(500); DoAIMove(); }
     ExMessage msg;
     int lastHoverTime = 0;
     while (1) {
+        if (!gameOver && timerLevel < 4) {
+            DWORD now = GetTickCount();
+            if (now - lastTick >= 1000) {
+                remainTime--;
+                lastTick = now;
+                RedrawBoard();
+                if (remainTime <= 0) {
+                    const wchar_t* msgText = dualMode ?
+                        (currentTurn == STONE_BLACK ? L"黑棋超时，白棋获胜！" : L"白棋超时，黑棋获胜！") :
+                        (isPlayerTurn ? L"时间到，你输了！" : L"时间到，AI 输了！");
+                    MessageBox(GetHWnd(), msgText, L"游戏结束", MB_OK);
+                    gameOver = 1; viewing = 1; RedrawBoard(1);
+                    continue;
+                }
+            }
+        }
+
         if (peekmessage(&msg, EM_MOUSE)) {
             if (msg.message == WM_MOUSEMOVE && !gameOver) {
                 int now = GetTickCount();
-                if (now - lastHoverTime < 30) continue; // 限制刷新频率
+                if (now - lastHoverTime < 30) continue;
                 lastHoverTime = now;
 
                 int c = (msg.x - MARGIN + CELL / 2) / CELL;
@@ -645,18 +901,23 @@ void RunGame() {
                 int x = msg.x, y = msg.y;
                 if (y >= BOARD_PX + 10 && y <= BOARD_PX + 50) {
                     if (x >= 40 && x <= 180) { UndoToPlayer(); continue; }
-                    if (x >= BOARD_PX - 180 && x <= BOARD_PX - 40) return;
+                    if (x >= BOARD_PX - 180 && x <= BOARD_PX - 40) {
+                        if (!gameOver && playerHasMoved) pausedGame = 1;
+                        return;
+                    }
                 }
                 if (gameOver) continue;
                 int c = (x - MARGIN + CELL / 2) / CELL;
                 int r = (y - MARGIN + CELL / 2) / CELL;
                 if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c] != EMPTY) continue;
-                if (moveCount == 0 && playerColor == STONE_BLACK && (r != 9 || c != 9)) {
+
+                int placeColor = dualMode ? currentTurn : playerColor;
+                if (moveCount == 0 && placeColor == STONE_BLACK && (r != 9 || c != 9)) {
                     MessageBox(GetHWnd(), L"黑棋第一手必须下在天元！", L"提示", MB_OK);
                     continue;
                 }
-                board[r][c] = playerColor;
-                if (IsForbidden(r, c, playerColor)) {
+                board[r][c] = placeColor;
+                if (IsForbidden(r, c, placeColor)) {
                     board[r][c] = EMPTY;
                     MessageBox(GetHWnd(), L"禁手！你输了", L"游戏结束", MB_OK);
                     gameOver = 1; viewing = 1; RedrawBoard(1); continue;
@@ -664,13 +925,27 @@ void RunGame() {
                 history.push_back(std::make_pair(r, c));
                 lastR = r; lastC = c;
                 moveCount++;
+                playerHasMoved = 1;
                 hoverR = hoverC = -1;
+                PlayDropSound();
                 RedrawBoard();
-                if (CheckFive(r, c, playerColor)) {
-                    MessageBox(GetHWnd(), L"恭喜你获胜！", L"游戏结束", MB_OK);
+
+                if (CheckFive(r, c, placeColor)) {
+                    const wchar_t* winMsg = dualMode ?
+                        (placeColor == STONE_BLACK ? L"黑棋获胜！" : L"白棋获胜！") :
+                        L"恭喜你获胜！";
+                    MessageBox(GetHWnd(), winMsg, L"游戏结束", MB_OK);
                     gameOver = 1; viewing = 1; RedrawBoard(1); continue;
                 }
-                DoAIMove();
+
+                if (dualMode) {
+                    currentTurn = 3 - currentTurn;
+                    ResetPlayerTimer();
+                    RedrawBoard();
+                }
+                else {
+                    DoAIMove();
+                }
             }
         }
         Sleep(5);
@@ -678,9 +953,12 @@ void RunGame() {
 }
 
 int main() {
+    GetExeDir();
     initgraph(BOARD_PX, WIN_H);
-    SetWindowText(GetHWnd(), L"五子棋 · 人机对战");
+    SetWindowText(GetHWnd(), L"五子棋");
+    if (enableBGM) PlayBGM();
     while (1) { RunMenu(); RunGame(); }
+    StopBGM();
     closegraph();
     return 0;
 }

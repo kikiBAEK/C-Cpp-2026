@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="firegames/firegames.vcxproj" Id="31453ef7-d46e-4a82-b71c-b4c03fbfeafc" />
+</Solution>

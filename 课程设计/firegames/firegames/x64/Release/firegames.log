@@ -1,0 +1,12 @@
+﻿EasyXw.lib(EasyX.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(Image.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX.Drawing.ColorModel.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX.GraphWnd.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX.Var.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX.ImageFunc.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX._Gdi.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX.DrawOnImg.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX.DrawOnWnd.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX._GdiPlus.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+EasyXw.lib(EasyX._Ole.obj) : error LNK2038: 检测到“RuntimeLibrary”的不匹配项: 值“MT_StaticRelease”不匹配值“MD_DynamicRelease”(firegames.obj 中)
+C:\Users\user\source\repos\firegames\x64\Release\firegames.exe : fatal error LNK1319: 检测到 11 个不匹配项

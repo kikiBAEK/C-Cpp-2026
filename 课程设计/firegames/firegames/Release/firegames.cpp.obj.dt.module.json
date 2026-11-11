@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "Release\\firegames.obj",
+            "outputs": [
+                "Release\\firegames.cpp.obj.dt.module.json",
+                "Release\\firegames.cpp.obj.dt.d.json"
+            ],
+            "requires": []
+        }
+    ]
+}
